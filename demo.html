@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Myanmar Dam Map API Demo</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: #2c5282;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .controls {
+            padding: 20px;
+            border-bottom: 1px solid #eee;
+        }
+        .region-filter {
+            display: inline-block;
+            margin-right: 20px;
+        }
+        .stats-panel {
+            background: #ebf8ff;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        #map {
+            height: 600px;
+            width: 100%;
+        }
+        .dam-popup {
+            font-size: 14px;
+        }
+        .dam-popup h3 {
+            margin: 0 0 10px 0;
+            color: #2c5282;
+        }
+        .water-info {
+            background: #e6fffa;
+            padding: 8px;
+            border-radius: 4px;
+            margin: 8px 0;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏞️ Myanmar Dam Map API Demo</h1>
+            <p>Interactive map showing Myanmar's dams with water level information</p>
+        </div>
+        
+        <div class="controls">
+            <div class="region-filter">
+                <label for="regionSelect">Filter by Region:</label>
+                <select id="regionSelect">
+                    <option value="">All Regions</option>
+                </select>
+            </div>
+            <button onclick="loadDams()" style="background: #2c5282; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">
+                🔄 Refresh Map
+            </button>
+        </div>
+        
+        <div id="statsPanel" class="stats-panel">
+            <div class="loading">Loading statistics...</div>
+        </div>
+        
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        let map;
+        let damMarkers = [];
+        const API_BASE = 'http://localhost:8000';
+
+        // Initialize the map
+        function initMap() {
+            map = L.map('map').setView([19.5, 96.1], 6); // Center on Myanmar
+            
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+        }
+
+        // Load regions for the dropdown
+        async function loadRegions() {
+            try {
+                const response = await fetch(`${API_BASE}/api/regions`);
+                const data = await response.json();
+                
+                const select = document.getElementById('regionSelect');
+                data.regions.forEach(region => {
+                    const option = document.createElement('option');
+                    option.value = region;
+                    option.textContent = region;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Error loading regions:', error);
+            }
+        }
+
+        // Load dam statistics
+        async function loadStats() {
+            try {
+                const response = await fetch(`${API_BASE}/api/stats`);
+                const data = await response.json();
+                
+                const statsPanel = document.getElementById('statsPanel');
+                statsPanel.innerHTML = `
+                    <h3>📊 Dam Statistics</h3>
+                    <p><strong>Total Dams:</strong> ${data.total_dams}</p>
+                    <p><strong>Total Capacity:</strong> ${data.total_capacity_mcm.toLocaleString()} million cubic meters</p>
+                    <p><strong>Total Surface Area:</strong> ${data.total_area_sqkm.toLocaleString()} square kilometers</p>
+                    <p><strong>Average Depth:</strong> ${data.average_depth_m} meters</p>
+                    <p><strong>Construction Years:</strong> ${data.construction_years.earliest} - ${data.construction_years.latest}</p>
+                `;
+            } catch (error) {
+                console.error('Error loading stats:', error);
+                document.getElementById('statsPanel').innerHTML = '<p style="color: red;">Error loading statistics</p>';
+            }
+        }
+
+        // Load and display dams on the map
+        async function loadDams() {
+            try {
+                // Clear existing markers
+                damMarkers.forEach(marker => map.removeLayer(marker));
+                damMarkers = [];
+                
+                const region = document.getElementById('regionSelect').value;
+                const url = region ? `${API_BASE}/api/dams/map?region=${encodeURIComponent(region)}` : `${API_BASE}/api/dams/map`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                console.log(`Loaded ${data.total_dams} dams${region ? ' for ' + region : ''}`);
+                
+                // Add markers for each dam
+                data.dams.forEach(dam => {
+                    const marker = L.marker([dam.coordinates.latitude, dam.coordinates.longitude])
+                        .bindPopup(`
+                            <div class="dam-popup">
+                                <h3>${dam.name || 'Unknown Dam'}</h3>
+                                <p><strong>Location:</strong> ${dam.details.admin_unit}, ${dam.details.river ? dam.details.river + ' River' : 'Unknown River'}</p>
+                                
+                                <div class="water-info">
+                                    <h4>💧 Water Information</h4>
+                                    <p><strong>Capacity:</strong> ${dam.water_info.capacity_mcm.toLocaleString()} million m³</p>
+                                    <p><strong>Surface Area:</strong> ${dam.water_info.area_sqkm.toLocaleString()} km²</p>
+                                    <p><strong>Depth:</strong> ${dam.water_info.depth_m} meters</p>
+                                    <p><strong>Elevation:</strong> ${dam.water_info.elevation_masl} meters above sea level</p>
+                                </div>
+                                
+                                <p><strong>Main Use:</strong> ${dam.details.main_use || 'Unknown'}</p>
+                                <p><strong>Year Built:</strong> ${dam.details.year_built > 0 ? dam.details.year_built : 'Unknown'}</p>
+                                <p><strong>Dam Height:</strong> ${dam.details.dam_height_m > 0 ? dam.details.dam_height_m + ' m' : 'Unknown'}</p>
+                                <p><strong>Dam Length:</strong> ${dam.details.dam_length_m > 0 ? dam.details.dam_length_m + ' m' : 'Unknown'}</p>
+                                <p><strong>Coordinates:</strong> ${dam.coordinates.latitude.toFixed(4)}, ${dam.coordinates.longitude.toFixed(4)}</p>
+                            </div>
+                        `);
+                    
+                    marker.addTo(map);
+                    damMarkers.push(marker);
+                });
+                
+                // Fit map to show all dams
+                if (damMarkers.length > 0) {
+                    const group = new L.featureGroup(damMarkers);
+                    map.fitBounds(group.getBounds().pad(0.1));
+                }
+                
+            } catch (error) {
+                console.error('Error loading dams:', error);
+                alert('Error loading dam data. Please make sure the API server is running on localhost:8000');
+            }
+        }
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            initMap();
+            loadRegions();
+            loadStats();
+            loadDams();
+            
+            // Add event listener for region filter
+            document.getElementById('regionSelect').addEventListener('change', loadDams);
+        });
+    </script>
+</body>
+</html>
